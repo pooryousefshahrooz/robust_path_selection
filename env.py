@@ -14,10 +14,10 @@ class Topology(object):
         self.shortest_paths_file = self.topology_file +'_shortest_paths'
         self.DG = nx.DiGraph()
 
-        self.load_topology()
+        self.load_topology(config)
         self.calculate_paths()
 
-    def load_topology(self):
+    def load_topology(self,config):
         print('[*] Loading topology...', self.topology_file)
         f = open(self.topology_file, 'r')
         header = f.readline()
@@ -34,7 +34,7 @@ class Topology(object):
             #print('this is our line',link,i, s, d, w, c)
             self.link_idx_to_sd[int(i)] = (int(s),int(d))
             self.link_sd_to_idx[(int(s),int(d))] = int(i)
-            self.link_capacities[int(i)] = float(c)
+            self.link_capacities[int(i)] = float(c)/config.capacity_division
             self.link_weights[int(i)] = int(w)
             self.DG.add_weighted_edges_from([(int(s),int(d),int(w))])
         
@@ -45,6 +45,48 @@ class Topology(object):
 
         #nx.draw_networkx(self.DG)
         #plt.show()
+    def get_each_flow_oblivious_paths(self,file_path):
+        counter = 0
+        flows = []
+        each_flow_edges = {}
+        each_flow_oblivious_paths = {}
+        with open(file_path) as file:
+            lines = file.readlines()
+            for line in lines:
+                if "@" in line:
+                    line  = line.strip()
+                    counter+=1
+                    path = line.split("@")[0]
+                    path = path.rstrip()
+                    path = path[1:-1]
+                    path = path.split("),")
+                    #print("new line",(path))
+                    new_path = []
+                    for item in path[1:-1]:
+                        nodes = item.split(",")
+                        two_nodes = []
+                        for node in nodes:
+                            node =node.replace(")","")
+                            node =node.replace("(","")
+                            node =node.replace("h","")
+                            node =node.replace("s","")
+                            if "abilene" in file_path:
+                                two_nodes.append(int(node)-1)
+                            else:
+                                two_nodes.append(int(node))
+                        #print(two_nodes)
+                        new_path.append((two_nodes[0],two_nodes[1]))
+
+                    flow = (new_path[0][0],new_path[len(new_path)-1][1])
+                    #print('for flow %s path is %s'%(flow,new_path))
+                    try:
+                        each_flow_oblivious_paths[flow].append(new_path)
+                    except:
+                        each_flow_oblivious_paths[flow]=[new_path]
+       
+        
+        
+        return each_flow_oblivious_paths
     def get_oblivious_paths_each_flow_edges(self,file_path,max_move,each_flow_shortest_paths):
         counter = 0
         flows = []
@@ -70,7 +112,10 @@ class Topology(object):
                             node =node.replace("(","")
                             node =node.replace("h","")
                             node =node.replace("s","")
-                            two_nodes.append(int(node)-1)
+                            if "abilene" in file_path:
+                                two_nodes.append(int(node)-1)
+                            else:
+                                two_nodes.append(int(node))
                         #print(two_nodes)
                         new_path.append((two_nodes[0],two_nodes[1]))
 
@@ -78,9 +123,15 @@ class Topology(object):
                     #print('for flow %s path is %s'%(flow,new_path))
                     try:
                         each_flow_oblivious_paths[flow].append(new_path)
+#                         each_flow_oblivious_paths[flow]=[new_path]
                     except:
                         each_flow_oblivious_paths[flow]=[new_path]
         #print("zero",len(list(each_flow_oblivious_paths.keys())))
+#         for flow ,path in each_flow_oblivious_paths.items():
+#             print("flow %s oblivious path %s"%(flow,path))
+        for flow,path in each_flow_shortest_paths.items():
+            if flow not in each_flow_oblivious_paths:
+                print("flow %s doest have an oblivous path"%(flow))
         for flow,paths in each_flow_oblivious_paths.items():
             if len(paths)==0:
                 print(flow,paths)
@@ -240,7 +291,7 @@ class Traffic(object):
                 j = v%self.num_nodes
                 if i != j:
                     #print('from node %s to node %s we have %s trafffic'%(i,j,float(volumes[v])*10))
-                    matrix[i][j] = float(volumes[v])
+                    matrix[i][j] = float(volumes[v])*config.demand_scale
             #print(matrix + '\n')
             traffic_matrices.append(matrix)
 

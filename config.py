@@ -1,7 +1,7 @@
 class NetworkConfig(object):
-  scale = 10
+  scale = 1
 
-  max_step = 100 * scale
+  max_step = 500 * scale
   
   initial_learning_rate = 0.0001
   learning_rate_decay_rate = 0.96
@@ -36,9 +36,9 @@ class Config(NetworkConfig):
   test_traffic_file = 'TM2'
   traffic_file = 'TM3'
   test_traffic_file = 'TM4'
-#   topology_file = 'ATT_topology_file_modified'
-#   traffic_file = 'TM'
-#   test_traffic_file = 'TM'
+  topology_file = 'ATT_topology_file_modified'
+  traffic_file = 'TM3'
+  test_traffic_file = 'TM4'
 #   topology_file = 'test_topology'
 #   traffic_file = 'TM'
 #   test_traffic_file = 'TM2'
@@ -52,10 +52,13 @@ class Config(NetworkConfig):
   look_ahead_window_range = 10
   logging_training_epochs = True
   training_epochs_experiment = True
+  printing_flag = True
   each_topology_each_t_each_f_paths= 'each_topology_each_t_each_f_paths.txt'
-  testing_results = 'testing_results_test.csv'
-  raeke_paths = "raeke_paths.txt"
-   
+  testing_results = 'testing_results_final.csv'
+  raeke_paths = "raeke_att.txt"
+#   raeke_paths = "raeke_abilene.txt"
+  capacity_division = 8# 8 for att and 1 for abilene
+  demand_scale = 60# 60 for att and 4 for abilene
 def get_config(FLAGS):
   config = Config
 

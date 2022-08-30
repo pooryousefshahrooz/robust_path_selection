@@ -19,10 +19,12 @@ from model import Network
 from config import get_config
 
 FLAGS = flags.FLAGS
-flags.DEFINE_integer('num_agents', 1, 'number of agents')
+flags.DEFINE_integer('num_agents',1, 'number of agents')
 flags.DEFINE_string('baseline', 'avg', 'avg: use average reward as baseline, best: best reward as baseline')
-flags.DEFINE_integer('num_iter', 10, 'Number of iterations each agent would run')
-
+flags.DEFINE_integer('num_iter', 20, 'Number of iterations each agent would run')
+# print(FLAGS.num_agents)
+import pdb
+# pdb.set_trace()
 GRADIENTS_CHECK=False
 
 
@@ -40,6 +42,7 @@ def extract_paths(topology_name,each_topology_each_t_each_f_paths):
     all_the_paths = set([])
     each_t_paths = {}
     each_flow_paths = {}
+    
     #print('topology is ',topology_name)
     with open(each_topology_each_t_each_f_paths) as file:
         lines = file.readlines()
@@ -179,6 +182,12 @@ def central_agent(config, game,commitment_window,look_ahead_window, model_weight
         network.ckpt.step.assign_add(1)
         model_weights = network.model.get_weights()
         number_of_training_epochs+=1
+#         print("***********************")
+#         print(len(model_weights_queues))
+#         print(FLAGS.num_agents)
+#         print("************.....**********")
+#         import pdb
+        #pdb.set_tracce()
         for i in range(FLAGS.num_agents):
             model_weights_queues[i].put(model_weights)
 
@@ -299,7 +308,7 @@ def central_agent(config, game,commitment_window,look_ahead_window, model_weight
                     }, step)
                 print('lr:%f, avg reward:%f, avg advantage:%f, avg entropy:%f'%(learning_rate, avg_reward, avg_advantage, avg_entropy))
 
-def agent(agent_id, config, game, each_flow_paths,each_flow_shortest_path,each_path_id,each_id_path,commitment_window,look_ahead_window,tm_subset, model_weights_queue, experience_queue):
+def agent(agent_id, config, game, each_flow_paths,each_path_edges,each_flow_shortest_path,each_path_id,each_id_path,commitment_window,look_ahead_window,tm_subset, model_weights_queue, experience_queue):
     random_state = np.random.RandomState(seed=agent_id)
     network = Network(config, game.state_dims, game.action_dim, game.max_moves,commitment_window,look_ahead_window, 1, master=False)
 
@@ -319,7 +328,9 @@ def agent(agent_id, config, game, each_flow_paths,each_flow_shortest_path,each_p
     #random_state.shuffle(tm_subset)
     #print('this is random state after shuffling',random_state)
     run_iterations = FLAGS.num_iter
-    
+    #print("****************--------------------------------------***************run_iterations",run_iterations)
+    import pdb
+    #pdb.set_trace()
     while True:
         
         tm_idx = tm_subset[idx]
@@ -360,27 +371,27 @@ def agent(agent_id, config, game, each_flow_paths,each_flow_shortest_path,each_p
             if not, we will use the shortest path for that flow"""
 
             #each_flow_shortest_path = env.get_each_flow_shortest_paths()
-    #         for flow, shortest_path in each_flow_shortest_path.items():
-    #             print("for flow %s we have shortest path %s "%(flow,shortest_path))
+#             for flow, shortest_path in each_flow_shortest_path.items():
+#                 print("for flow %s we have shortest path %s "%(flow,shortest_path))
             import pdb
 
             #print("the rl has selected %s paths "%(len(actions)))
             for flow,paths in each_flow_paths.items():
                 covered_flow = False
                 for path in paths:
-                    path_id = each_path_id[path]
+                    
                     if not covered_flow:
-                        if path_id in actions:
+                        if path in actions:
                             covered_flow =True 
                 if not covered_flow:
-                    #print("flow  did not have any candidate path in chosen paths",flow)
+#                     print("flow  did not have any candidate path in chosen paths",flow)
                     flow_shortest_path = each_flow_shortest_path[flow]
-                    #print(flow_shortest_path)
+#                     print(flow_shortest_path)
                     #print(each_path_id)
                     path_id = each_path_id[tuple(flow_shortest_path)]
-
+            
                     actions = np.append(actions, path_id)
-                    #print("we added path id %s for safety"%(path_id))
+#                     print("we added path id %s for safety for flow %s"%(path_id,flow))
 
             """end of safe online learning section"""
 
@@ -392,23 +403,30 @@ def agent(agent_id, config, game, each_flow_paths,each_flow_shortest_path,each_p
             each_flow_edges = {}
             for flow in each_flow_shortest_path:
                 for path_id in actions:
-                    path = each_id_path[path_id]
-                    if path in each_flow_paths[flow]:
+                    path = each_path_edges[path_id]
+                    if path_id in each_flow_paths[flow]:
+                        this_path_edges = each_path_edges[path_id]
                         try:
-                            each_flow_selected_paths[flow].append(path)
+                            each_flow_selected_paths[flow].append(path_id)
                         except:
-                            each_flow_selected_paths[flow]=[path]
-                        for node_indx in range(len(path)-1):
+                            each_flow_selected_paths[flow]=[path_id]
+                        for edge in path:
+#                             print("we are adding edge ",edge)
                             try:
-                                if (path[node_indx],path[node_indx+1]) not in each_flow_edges[flow]:
-                                    each_flow_edges[flow].append((path[node_indx],path[node_indx+1]))
-                                    each_flow_edges[flow].append((path[node_indx+1],path[node_indx]))
+                                if edge not in each_flow_edges[flow] and (edge[1],edge[0]) not in each_flow_edges[flow]:
+                                    each_flow_edges[flow].append(edge)
+                                    each_flow_edges[flow].append((edge[1],edge[0]))
                             except:
-                                each_flow_edges[flow]=[(path[node_indx],path[node_indx+1])]
-                                each_flow_edges[flow].append((path[node_indx+1],path[node_indx]))
+                                each_flow_edges[flow]=[edge]
+                                each_flow_edges[flow].append((edge[1],edge[0]))
+                                
+                                
+#                 if flow ==(0, 5):
+#                     print("each_flow_paths",each_flow_paths)
+#                     print("here are the edges for this flow ",each_flow_edges[flow])
 
-    #         for flow,edges in each_flow_edges.items():
-    #             print("this flow %s has these edges %s"%(flow,edges))
+#             for flow,edges in each_flow_edges.items():
+#                 print("this flow %s has these edges %s"%(flow,edges))
             p_counter = 0
             for flow,paths in each_flow_selected_paths.items():
                 for path in paths:
@@ -419,7 +437,7 @@ def agent(agent_id, config, game, each_flow_paths,each_flow_shortest_path,each_p
 
     #         for path_id in actions:
     #             each_flow_edges[]
-            reward = game.reward2(tm_idx,num_tms,look_ahead_window,each_flow_edges,each_flow_paths,each_path_id,each_id_path,each_flow_shortest_path,config.topology_file)
+            reward = game.reward2(tm_idx,num_tms,look_ahead_window,each_flow_edges,each_flow_paths,each_path_id,each_id_path,each_flow_shortest_path,config.topology_file,config.printing_flag)
             r_batch.append(reward)
 
             if config.method == 'pure_policy':
@@ -477,18 +495,59 @@ def main(_):
     each_path_id = {}
     id_counter = 0
     each_id_path = {}
+    covered_paths = []
+    each_path_edges = {}
+    new_each_flow_paths = {}
     for flow,paths in each_flow_paths.items():
         for p in paths:
+            covered_paths.append(p)
             each_path_id[tuple(p)] = id_counter
+            try:
+                new_each_flow_paths[flow].append(id_counter)
+            except:
+                new_each_flow_paths[flow] = [id_counter]
             each_id_path[id_counter] = tuple(p)
+            path = tuple(p)
+            for node_indx in range(len(path)-1):
+                try:
+                    if (path[node_indx],path[node_indx+1]) not in each_path_edges[id_counter]:
+                        each_path_edges[id_counter].append((path[node_indx],path[node_indx+1]))
+                        each_path_edges[id_counter].append((path[node_indx+1],path[node_indx]))
+                except:
+                    each_path_edges[id_counter]=[(path[node_indx],path[node_indx+1])]
+                    each_path_edges[id_counter].append((path[node_indx+1],path[node_indx]))
+            
             id_counter+=1
+            
     env = Environment(config,is_training=True)
     #print("env.num_nodes",env.num_nodes)
     import pdb
     #pdb.set_trace()
     each_flow_shortest_paths = env.topology.get_each_flow_shortest_paths()
-    for commitment_window in range(2,int(config.commitment_window_range)):
-        for look_ahead_window in range(3,int(config.look_ahead_window_range)):
+    for flow,p in each_flow_shortest_paths.items():
+        p = tuple(p)
+        if p not in covered_paths:
+            each_path_id[tuple(p)] = id_counter
+            try:
+                new_each_flow_paths[flow].append(id_counter)
+            except:
+                new_each_flow_paths[flow] = [id_counter]
+                
+            each_id_path[id_counter] = tuple(p)
+            path = tuple(p)
+            for node_indx in range(len(path)-1):
+                try:
+                    if (path[node_indx],path[node_indx+1]) not in each_path_edges[id_counter]:
+                        each_path_edges[id_counter].append((path[node_indx],path[node_indx+1]))
+                        each_path_edges[id_counter].append((path[node_indx+1],path[node_indx]))
+                except:
+                    each_path_edges[id_counter]=[(path[node_indx],path[node_indx+1])]
+                    each_path_edges[id_counter].append((path[node_indx+1],path[node_indx]))
+            id_counter+=1
+            
+    for commitment_window in [10]:
+        #for look_ahead_window in range(4,int(config.look_ahead_window_range)):
+        for look_ahead_window in [4]:
             """we first find the candidate paths and use it for action dimention"""
             
             
@@ -504,9 +563,11 @@ def main(_):
                 FLAGS.num_agents = mp.cpu_count() - 1
             #print('Agent num: %d, iter num: %d\n'%(FLAGS.num_agents+1, FLAGS.num_iter))
             for _ in range(FLAGS.num_agents):
+#                 print("we are ddding one to weight queue ")
                 model_weights_queues.append(mp.Queue(1))
                 experience_queues.append(mp.Queue(1))
-
+                import pdb
+            #pdb.set_trace()
             tm_subsets = np.array_split(game.tm_indexes, FLAGS.num_agents)
 
             coordinator = mp.Process(target=central_agent, args=(config, game,commitment_window,look_ahead_window, model_weights_queues, experience_queues))
@@ -514,8 +575,11 @@ def main(_):
             coordinator.start()
 
             agents = []
+            print("these are the agents ",FLAGS.num_agents)
+            import pdb
+            #pdb.set_trace()
             for i in range(FLAGS.num_agents):
-                agents.append(mp.Process(target=agent, args=(i, config, game,each_flow_paths,each_flow_shortest_paths,each_path_id,each_id_path,commitment_window, look_ahead_window,tm_subsets[i], model_weights_queues[i], experience_queues[i])))
+                agents.append(mp.Process(target=agent, args=(i, config, game,new_each_flow_paths,each_path_edges,each_flow_shortest_paths,each_path_id,each_id_path,commitment_window, look_ahead_window,tm_subsets[i], model_weights_queues[i], experience_queues[i])))
 
             for i in range(FLAGS.num_agents):
                 agents[i].start()
