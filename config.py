@@ -55,8 +55,9 @@ class Config(NetworkConfig):
   printing_flag = True
   each_topology_each_t_each_f_paths= 'each_topology_each_t_each_f_paths.txt'
   testing_results = 'testing_results_final.csv'
-  raeke_paths = "raeke_att.txt"
+  
   raeke_paths = "raeke_abilene.txt"
+#   raeke_paths = "raeke_att_new"
   capacity_division = 1# 8 for att and 1 for abilene
   demand_scale = 4# 60 for att and 4 for abilene
 def get_config(FLAGS):

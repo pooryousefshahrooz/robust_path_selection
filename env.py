@@ -62,7 +62,107 @@ class Topology(object):
                     path = path.split("),")
                     #print("new line",(path))
                     new_path = []
+                    if "abilene" in file_path:
+                        path = path[1:-1]
+                    for item in path:
+                        nodes = item.split(",")
+                        #print("these are nodes",nodes)
+                        two_nodes = []
+                        for node in nodes:
+                            node =node.replace(")","")
+                            node =node.replace("(","")
+                            node =node.replace("h","")
+                            node =node.replace("s","")
+                            
+                            if "abilene" in file_path:
+                                two_nodes.append(int(node)-1)
+                            else:
+                                two_nodes.append(int(node))
+                        #print("the two nodes list",two_nodes)
+                        new_path.append((two_nodes[0],two_nodes[1]))
+                    #print("path[1:-1]",path[1:-1])
+                    #print("new_path",new_path)
+                    #print("start edge %s end edge of path %s"%(new_path[0],new_path[len(new_path)-1]))
+                    #print("start of path ", new_path[0][0])
+                    #print("end of path ",new_path[len(new_path)-1][1])
+                    start = new_path[0][0]
+                    end = new_path[len(new_path)-1][1]
+                    flow = (start,end)
+                    #print('for flow %s path is %s'%(flow,new_path))
+                    try:
+                        each_flow_oblivious_paths[flow].append(new_path)
+                    except:
+                        each_flow_oblivious_paths[flow]=[new_path]
+       
+        
+        
+        return each_flow_oblivious_paths
+    def back_up_get_each_flow_oblivious_paths(self,file_path):
+        counter = 0
+        flows = []
+        each_flow_edges = {}
+        each_flow_oblivious_paths = {}
+        with open(file_path) as file:
+            lines = file.readlines()
+            for line in lines:
+                if "@" in line:
+                    line  = line.strip()
+                    counter+=1
+                    path = line.split("@")[0]
+                    path = path.rstrip()
+                    path = path[1:-1]
+                    path = path.split("),")
+                    #print("new line",(path))
+                    new_path = []
                     for item in path[1:-1]:
+                        nodes = item.split(",")
+                        #print("these are nodes",nodes)
+                        two_nodes = []
+                        for node in nodes:
+                            node =node.replace(")","")
+                            node =node.replace("(","")
+                            node =node.replace("h","")
+                            node =node.replace("s","")
+                            
+                            if "abilene" in file_path:
+                                two_nodes.append(int(node)-1)
+                            else:
+                                two_nodes.append(int(node))
+                        #print("the two nodes list",two_nodes)
+                        new_path.append((two_nodes[0],two_nodes[1]))
+                    #print("path[1:-1]",path[1:-1])
+                    #print("new_path",new_path)
+                    flow = (new_path[0][0],new_path[len(new_path)-1][1])
+                    #print('for flow %s path is %s'%(flow,new_path))
+                    try:
+                        each_flow_oblivious_paths[flow].append(new_path)
+                    except:
+                        each_flow_oblivious_paths[flow]=[new_path]
+       
+        
+        
+        return each_flow_oblivious_paths
+    def get_oblivious_paths_each_flow_edges(self,file_path,max_move,each_flow_shortest_paths):
+        counter = 0
+        flows = []
+        each_flow_edges = {}
+        each_flow_oblivious_paths = {}
+        with open(file_path) as file:
+            lines = file.readlines()
+            for line in lines:
+                if "@" in line:
+                    line  = line.strip()
+                    counter+=1
+                    path = line.split("@")[0]
+                    path = path.rstrip()
+                    path = path[1:-1]
+                    path = path.split("),")
+                    #print("new line",(path))
+                    new_path = []
+                    if "abilene" in file_path:
+                        path = path[1:-1]
+                   
+                    for item in path:
                         nodes = item.split(",")
                         two_nodes = []
                         for node in nodes:
@@ -76,18 +176,91 @@ class Topology(object):
                                 two_nodes.append(int(node))
                         #print(two_nodes)
                         new_path.append((two_nodes[0],two_nodes[1]))
-
-                    flow = (new_path[0][0],new_path[len(new_path)-1][1])
+                    start = new_path[0][0]
+                    end = new_path[len(new_path)-1][1]
+                    flow = (start,end)
+                    
                     #print('for flow %s path is %s'%(flow,new_path))
                     try:
                         each_flow_oblivious_paths[flow].append(new_path)
+#                         each_flow_oblivious_paths[flow]=[new_path]
                     except:
                         each_flow_oblivious_paths[flow]=[new_path]
+        #print("zero",len(list(each_flow_oblivious_paths.keys())))
+#         for flow ,path in each_flow_oblivious_paths.items():
+#             print("flow %s oblivious path %s"%(flow,path))
+        for flow,path in each_flow_shortest_paths.items():
+            if flow not in each_flow_oblivious_paths:
+                print("flow %s doest have an oblivous path"%(flow))
+        for flow,paths in each_flow_oblivious_paths.items():
+            if len(paths)==0:
+                print(flow,paths)
+        each_flow_chosen_paths = {}
+        chosen_paths = []
+        there_is_at_least_one_path = True
+        one_path_for_each_flow_flag = {}
+        for flow in each_flow_shortest_paths:
+            one_path_for_each_flow_flag[flow] = True
+        while(len(chosen_paths)<max_move and there_is_at_least_one_path):
+            there_is_at_least_one_path = False
+            for flow in each_flow_shortest_paths:
+                paths = each_flow_oblivious_paths[flow]
+                if paths:
+                    there_is_at_least_one_path = True
+                    #print(paths)
+                    path = paths[0]
+                    if path not in chosen_paths:
+                        chosen_paths.append(path)
+                    paths.pop(0)
+                    each_flow_oblivious_paths[flow] = paths
+                    if len(chosen_paths)<max_move or one_path_for_each_flow_flag[flow]:
+                        try:
+                            each_flow_chosen_paths[flow].append(path)
+                        except:
+                            each_flow_chosen_paths[flow]=[path]
+                        one_path_for_each_flow_flag[flow] = False
+        
        
         
         
-        return each_flow_oblivious_paths
-    def get_oblivious_paths_each_flow_edges(self,file_path,max_move,each_flow_shortest_paths):
+    
+        each_flow_edges = {}
+        flow_counter = 1
+        for flow,paths in each_flow_chosen_paths.items():
+            #print("for %s flow number %s we"%(flow,flow_counter))
+            
+            for path in paths:
+                #print("is it normal? a list of edges??",path)
+                #if len(path)>1:
+                for edge in path:
+                    try:
+                        if (edge) not in each_flow_edges[flow]:
+                            each_flow_edges[flow].append(edge)
+                            each_flow_edges[flow].append((edge[1],edge[0]))
+                            #print("we added for ",flow,flow_counter,edge,(edge[1],edge[0]))
+                    except:
+                        each_flow_edges[flow]=[edge]
+                        each_flow_edges[flow].append((edge[1],edge[0]))
+                            #print("we added for ",flow,flow_counter)
+#                 else:
+#                     one_hop_path = path[0]
+#                     print("error in this path",path,one_hop_path,one_hop_path[0],one_hop_path[1])
+#                     try:
+                        
+#                         if (one_hop_path[0],one_hop_path[1]) not in each_flow_edges[flow]:
+#                             each_flow_edges[flow].append((one_hop_path[0],one_hop_path[1]))
+#                             each_flow_edges[flow].append((one_hop_path[1],one_hop_path[0]))
+#                             #print("we added for ",flow,flow_counter)
+#                     except:
+
+#                         each_flow_edges[flow]=[(one_hop_path[0],one_hop_path[1])]
+#                         each_flow_edges[flow].append((one_hop_path[1],one_hop_path[0]))
+                        #print("we added for ",flow,flow_counter)
+        flow_counter+=1
+        #print("third",len(list(each_flow_edges.keys())))
+        return each_flow_edges
+    
+    def back_up_get_oblivious_paths_each_flow_edges(self,file_path,max_move,each_flow_shortest_paths):
         counter = 0
         flows = []
         each_flow_edges = {}

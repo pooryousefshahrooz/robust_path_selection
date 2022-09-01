@@ -1612,10 +1612,10 @@ class CFRRL_Game(Game):
             
             each_flow_oblivious_paths_edges = env.topology.get_oblivious_paths_each_flow_edges(config.raeke_paths,
                                                                                           max_move,self.each_flow_shortest_path)
-            oblivious_mlus,oblivious_solutions = self.mlu_routing_selected_paths_oblivious(tm_idx,look_ahead_window,
-                                                                             each_flow_oblivious_paths_edges)
-#             oblivious_mlus,oblivious_solutions  = self.mlu_routing_selected_paths(tm_idx,look_ahead_window,
-#                                                                    each_flow_oblivious_paths_edges)
+#             oblivious_mlus,oblivious_solutions = self.mlu_routing_selected_paths_oblivious(tm_idx,look_ahead_window,
+#                                                                              each_flow_oblivious_paths_edges)
+            oblivious_mlus,oblivious_solutions  = self.mlu_routing_selected_paths(tm_idx,look_ahead_window,
+                                                                   each_flow_oblivious_paths_edges)
             solution = {}
             return oblivious_mlus,oblivious_solutions,1,solution
         elif scheme =="Oblivious2":
@@ -1626,8 +1626,8 @@ class CFRRL_Game(Game):
             oblivious_mlus,oblivious_solutions = self.mlu_routing_selected_paths_oblivious2(tm_idx,look_ahead_window,
                                                                              each_flow_oblivious_paths_edges)
             
-#             oblivious_mlus,oblivious_solutions  = self.mlu_routing_selected_paths(tm_idx,look_ahead_window,
-#                                                                    each_flow_oblivious_paths_edges)
+            oblivious_mlus,oblivious_solutions  = self.mlu_routing_selected_paths(tm_idx,look_ahead_window,
+                                                                   each_flow_oblivious_paths_edges)
             solution = {}
             return oblivious_mlus,oblivious_solutions,1,solution
         elif scheme =="MLU-greedy":
@@ -1679,7 +1679,7 @@ class CFRRL_Game(Game):
 #                     print("error")
 #             print("max rl %s max  oblivios %s"%(max(rl_max_node_number),max(oblivious_max_node_number)))
 #             print("min rl %s min  oblivios %s"%(min(rl_max_node_number),min(oblivious_max_node_number)))
-            print("unique rl %s unique  oblivios %s"%(len(list(set(rl_max_node_number))),len(list(set(oblivious_max_node_number)))))
+            #print("unique rl %s unique  oblivios %s"%(len(list(set(rl_max_node_number))),len(list(set(oblivious_max_node_number)))))
             actions.sort()
 #             for path in actions:
 #                 print("for DRL sceme we have %s path %s"%(len(actions),path))
