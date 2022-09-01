@@ -21,11 +21,18 @@ import csv
 FLAGS = flags.FLAGS
 flags.DEFINE_string('ckpt', '', 'apply a specific checkpoint')
 flags.DEFINE_boolean('eval_delay', False, 'evaluate delay or not')
-def get_paths_number(topology_name,each_topology_each_t_each_f_paths):
+def get_paths_info(topology_name,each_topology_each_t_each_f_paths):
+    """in this function, we get the B=4 most used paths by each flow
     
-    
+    we get all the used path by each flow over all times and get top 4 of them"""
+    path_counter = 0
+    each_path_id = {}
+    set_of_times = set([])
+    each_flow_path_usage = {}
     all_the_paths = set([])
     each_t_paths = {}
+    each_flow_paths = {}
+    
     #print('topology is ',topology_name)
     with open(each_topology_each_t_each_f_paths) as file:
         lines = file.readlines()
@@ -35,6 +42,7 @@ def get_paths_number(topology_name,each_topology_each_t_each_f_paths):
                 flow_str = line.split(":")[2]
                 flow = flow_str.split("->")
                 flow = (int(flow[0]),int(flow[1]))
+                set_of_times.add(time)
                 paths = line.split(flow_str+":")[1]
                 paths = paths.strip()
                 paths = "\""+str(paths)+"\""
@@ -57,18 +65,17 @@ def get_paths_number(topology_name,each_topology_each_t_each_f_paths):
                     for node in p:
                         new_p.append(int(node))
                     p = tuple(new_p)
-                    
                     try:
                         each_t_paths[time].add(p)
                     except:
                         each_t_paths[time] = set([p])
                     all_the_paths.add(p)
-                    
+
     paths_number = []
     for time, paths in each_t_paths.items():
-        #print('for time %s we had %s paths'%(time,len(paths)))
         paths_number.append(len(paths))
     avg_paths_per_time = int((sum(paths_number)/len(paths_number)))
+     
     return len(list(all_the_paths)),avg_paths_per_time
 
 def get_other_schemes_mlu(scheme):
@@ -99,13 +106,14 @@ def main(_):
     env = Environment(config, is_training=False)
     
     each_flow_shortest_paths = env.topology.get_each_flow_shortest_paths()
-    path_counter,avg_paths_per_time = get_paths_number(config.topology_file,config.each_topology_each_t_each_f_paths)
+    path_counter,avg_paths_per_time = get_paths_info(config.topology_file,config.each_topology_each_t_each_f_paths)
     #for commitment_window in range(2,int(config.commitment_window_range)):
     for commitment_window in [4,6,2,8,10]:
         #for look_ahead_window in range(6,int(config.look_ahead_window_range)):
         for look_ahead_window in [2,4,6,8,10]:
             """we first find the candidate paths and use it for action dimention"""
             game = CFRRL_Game(config, env,commitment_window,look_ahead_window,path_counter,avg_paths_per_time)
+            game.set_paths_info(env,config.topology_file,config.each_topology_each_t_each_f_paths)
             game.max_moves = avg_paths_per_time
             max_value = avg_paths_per_time
             training_epochs = game.get_all_trainig_epochs(commitment_window,look_ahead_window)
@@ -128,8 +136,8 @@ def main(_):
                     if training_epoch==min(training_epochs):
                         mlu_greedy_mlus,mlu_greedy_solutions,_,_ = game.evaluate2(env,config,tm_idx,len(game.tm_indexes),commitment_window,look_ahead_window,config.topology_file,"MLU-greedy", max_value,actions, eval_delay=False)
                         ecmp_mlus,_,_,_ = game.evaluate2(env,config,tm_idx,len(game.tm_indexes),commitment_window,look_ahead_window,config.topology_file, "ECMP",max_value,actions, eval_delay=False)
-#                         oblivious_mlus,_,_,_ = game.evaluate2(env,config,tm_idx,len(game.tm_indexes),commitment_window,look_ahead_window,config.topology_file,"Oblivious", max_value,actions, eval_delay=False)
-#                         oblivious2_mlus,_,_,_ = game.evaluate2(env,config,tm_idx,len(game.tm_indexes),commitment_window,look_ahead_window,config.topology_file,"Oblivious2", max_value,actions, eval_delay=False)
+                        oblivious_mlus,_,_,_ = game.evaluate2(env,config,tm_idx,len(game.tm_indexes),commitment_window,look_ahead_window,config.topology_file,"Oblivious", max_value,actions, eval_delay=False)
+                        oblivious2_mlus,_,_,_ = game.evaluate2(env,config,tm_idx,len(game.tm_indexes),commitment_window,look_ahead_window,config.topology_file,"Oblivious2", max_value,actions, eval_delay=False)
                         optimal1_mlus,_,optimal2_mlus,_ = game.evaluate2(env,config,tm_idx,len(game.tm_indexes),commitment_window,look_ahead_window,config.topology_file,"Optimal", max_value,actions, eval_delay=False)
                     toplogy_t_solution_mlu_result = config.testing_results
                     #print("training_epochs",training_epochs)
@@ -184,4 +192,16 @@ def main(_):
                 
 if __name__ == '__main__':
     app.run(main)
+
+
+# In[ ]:
+
+
+
+
+
+# In[ ]:
+
+
+
 

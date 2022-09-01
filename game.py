@@ -13,6 +13,7 @@ import ast
 import csv
 from tqdm import tqdm
 import numpy as np
+import time
 from pulp import LpMinimize, LpMaximize, LpProblem, LpStatus, lpSum, LpVariable, value, GLPK
 
 OBJ_EPSILON = 1e-12
@@ -69,7 +70,11 @@ class Game(object):
         self.load_multiplier = {}
         
         
-        
+        self.each_path_edges = {}
+        self.each_flow_paths = {}
+        self.each_flow_shortest_path ={}
+        self.each_path_id={}
+        self.each_id_path={}
         
         
     def generate_inputs(self, normalization=True):
@@ -398,347 +403,13 @@ class Game(object):
         return tm_mlu_using_suggested_paths,solutions
     def mlu_routing_selected_paths_oblivious(self,tm_idx,look_ahead_window,each_flow_edges):
         
-        #print("we check mlu for tm_idx",tm_idx)
-        tm_mlu_using_suggested_paths = []
-        solutions = []
-        #for k in each_flow_edges.keys():
-            #print('flow is ',k)
-        
-        for i in range(self.num_pairs):
-            s, d = self.pair_idx_to_sd[i]
-#             print('flow is ',s,d)
-            print("the edges of this flow %s are %s"%((s,d),each_flow_edges[(s,d)]))
-        #print('self.lp_pairs',self.lp_pairs)
-        #print(each_flow_edges)
-        import pdb
-        #pdb.set_trace()
-        
-        traffic_m_indx = tm_idx
-        tm = self.traffic_matrices[traffic_m_indx]
-
-        demands = {}
-        for i in range(self.num_pairs):
-            s, d = self.pair_idx_to_sd[i]
-            demands[i] = tm[s][d]
-            #demands[i] = 0
-            #print("demand from src %s to dst %s is %s"%(s,d,demands[i])) 
-
-        model = LpProblem(name="routing")
-#         print('this %s is our self.pair_links' %(self.pair_links)) 
-        ratio = LpVariable.dicts(name="ratio", indexs=self.pair_links, lowBound=0, upBound=1)
-        #print(ratio)
-        link_load = LpVariable.dicts(name="link_load", indexs=self.links)
-#         print("this %s is self.lp_links"%(self.lp_links))
-#         print("this %s is self.lp_nodes"%(self.lp_nodes))
-#         print("this %s is self.lp_pairs"%(self.lp_pairs))
-        import pdb
-
-        r = LpVariable(name="congestion_ratio")
-        for pr in self.lp_pairs:
-            s, d = self.pair_idx_to_sd[pr]
-            for edge in self.lp_links:
-                if (edge[0],edge[1]) not in each_flow_edges[(s,d)]:
-                    model +=(ratio[pr, edge[0], edge[1]] ==0.0)
-
-        for pr in self.lp_pairs:
-#            print("for pr %s we add"%(pr))
-            #s, d = self.pair_idx_to_sd[pr]
-            model += (lpSum([ratio[pr, e[0], e[1]] 
-                             for e in self.lp_links if e[1] == self.pair_idx_to_sd[pr][0]]) - 
-                      lpSum([ratio[pr, e[0], e[1]] 
-                        for e in self.lp_links if e[0] == self.pair_idx_to_sd[pr][0]]) == -1 ,
-                      "flow_conservation_constr1_%d"%pr)
-
-        for pr in self.lp_pairs:
-            model += (lpSum([ratio[pr, e[0], e[1]] 
-                    for e in self.lp_links if e[1] == self.pair_idx_to_sd[pr][1]]) -
-                    lpSum([ratio[pr, e[0], e[1]] 
-                    for e in self.lp_links if e[0] == self.pair_idx_to_sd[pr][1]]) == 1,
-                      "flow_conservation_constr2_%d"%pr)
-
-        for pr in self.lp_pairs:
-            for n in self.lp_nodes:
-                if n not in self.pair_idx_to_sd[pr]:
-                    model += (lpSum([ratio[pr, e[0], e[1]] 
-                    for e in self.lp_links if e[1] == n]) -
-                    lpSum([ratio[pr, e[0], e[1]] for e in self.lp_links if e[0] == n]) == 0,
-                    "flow_conservation_constr3_%d_%d"%(pr,n))
-
-        for e in self.lp_links:
-            ei = self.link_sd_to_idx[e]
-            #print("for edge %s ei %s capacity is %s "%(e,ei,self.link_capacities[ei]))
-            model += (link_load[ei] == lpSum([demands[pr]*ratio[pr, e[0], e[1]] 
-                for pr in self.lp_pairs]), "link_load_constr%d"%ei)
-
-            model += (link_load[ei] <= self.link_capacities[ei]*r, "congestion_ratio_constr%d"%ei)
-
-        model += r + OBJ_EPSILON*lpSum([link_load[e] for e in self.links])
-
-        model.solve(solver=GLPK(msg=False))
-        assert LpStatus[model.status] == 'Optimal'
-
-        obj_r = r.value()
-        solution = {}
-        for k in ratio:
-            solution[k] = ratio[k].value()
-        for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
-            tm = self.traffic_matrices[traffic_m_indx]
-            oblivious_mlu, oblivious_mlu_delay = self.eval_optimal_routing_mlu(traffic_m_indx, solution, eval_delay=False)
-            tm_mlu_using_suggested_paths.append(oblivious_mlu)
-            solutions.append(solution)
-            #print("******* we got the solution ",drl_mlu)
-        #return obj_r, solution 
-        #print("here are the four mlu",tm_mlu_using_suggested_paths)
-        return tm_mlu_using_suggested_paths,solutions
-    def optimal_solution_for_robust_paths(self,tm_idx,look_ahead_window,each_flow_paths,each_path_edges):
-        #print("we check mlu for tm_idx",tm_idx)
-        T= 0
-        R=0
-        all_paths = []
-        for path in each_path_edges:
-            if path not in all_paths:
-                all_paths.append(path)
-        for flow in self.lp_pairs:
-            R+=1 
-        R = max(R,self.max_moves)
-        for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
-            T+=1
-        all_flows = []
-        new_each_flow_paths = {}
-        for pr in self.lp_pairs:
-            s, d = self.pair_idx_to_sd[pr]
-            for path in each_flow_paths[(s,d)]:
-                try:
-                    new_each_flow_paths[pr].append(path)
-                except:
-                    new_each_flow_paths[pr]=[path]
-            all_flows.append(pr)
-#         for flow,paths in new_each_flow_paths.items():
-#             print("flow %s paths %s"%(flow,paths))
-        each_flow_paths = {}
-        each_path_flow = {}
-        for f,paths in new_each_flow_paths.items():
-            each_flow_paths[f] = paths
-            for path in paths:
-                each_path_flow[path] = f
-        tm_mlu_using_suggested_paths = []
-        solutions = []
-
-        import pdb
-        #pdb.set_trace()
-        demands = {}
-        for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
-            tm = self.traffic_matrices[traffic_m_indx]
-            for i in range(self.num_pairs):
-                s, d = self.pair_idx_to_sd[i]
-                try:
-                    demands[traffic_m_indx][i] = tm[s][d]
-                except:
-                    demands[traffic_m_indx]={}
-                    demands[traffic_m_indx][i] = tm[s][d]
-                    
-                #demands[i] = 0
-                #print("demand from src %s to dst %s is %s"%(s,d,demands[i])) 
-        time_links_load_indexes = []
-        model = LpProblem(name="routing")
-    #         print('this %s is our self.pair_links' %(self.pair_links)) 
-        new_time_flow_paths_indexes = []
-        time_link_tracker_id = 0
-        each_t_link_index = {}
-        for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
-            #print("these are pair links",self.pair_links)
-            for link in self.links:
-                time_links_load_indexes.append(time_link_tracker_id)
-                #print("key is %s trafic_mx_id %s link %s"%((traffic_m_indx,link),traffic_m_indx,link))
-                each_t_link_index[(traffic_m_indx,link)] = time_link_tracker_id
-                time_link_tracker_id +=1
-            for pr,paths in each_flow_paths.items():
-                for path_id in paths:
-                    new_time_flow_paths_indexes.append((traffic_m_indx,pr,path_id))
-                #print("for time %s flow %s links are %s "%(traffic_m_indx,flow_links))
-        import pdb
-        
-        ratio = LpVariable.dicts(name="ratio", indexs=new_time_flow_paths_indexes, lowBound=0, upBound=1)
-        each_path_variable = LpVariable.dicts(name="pathflagh", indexs=each_path_edges.keys(),cat="Integer", lowBound=0, upBound=1)
-        #print(ratio)
-        
-        link_load = LpVariable.dicts(name="time_link_load", indexs=time_links_load_indexes)
-#         print("this %s is self.lp_links"%(self.lp_links))
-#         print("this %s is self.lp_nodes"%(self.lp_nodes))
-#         print("this %s is self.lp_pairs"%(self.lp_pairs))
-        import pdb
-        
-        r = LpVariable(name="congestion_ratio")
-#         for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
-#             for pr in all_flows:
-#                 for path in each_flow_paths[pr]:
-#                 #for edge in self.lp_links:
-# #                     if (edge[0],edge[1]) not in each_flow_edges[(s,d)]:
-#                     if  each_path_variable[path] ==0:
-#                         model +=(ratio[traffic_m_indx,pr, path] ==0.0)
-        for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
-            for pr in self.lp_pairs:
-                s, d = self.pair_idx_to_sd[pr]
-                flow = (s,d)
-    #            print("for pr %s we add"%(pr))
-                #s, d = self.pair_idx_to_sd[pr]
-                model += (lpSum([ratio[traffic_m_indx,pr, path] 
-                                 for path in each_flow_paths[pr]]) == 1 ,
-                          "flow_conservation_constr1_%d_%d"%(traffic_m_indx,pr))
-        #print("the value of R is %s"%(R))
-        model += (lpSum([each_path_variable[path] for path in all_paths]) == R,"all_paths")
-
-#         for pr in self.lp_pairs:
-#             for n in self.lp_nodes:
-#                 if n not in self.pair_idx_to_sd[pr]:
-#                     model += (lpSum([ratio[pr, e[0], e[1]] 
-#                     for e in self.lp_links if e[1] == n]) -
-#                     lpSum([ratio[pr, e[0], e[1]] for e in self.lp_links if e[0] == n]) == 0,
-#                     "flow_conservation_constr3_%d_%d"%(pr,n))
-
-#         for e in self.lp_links:
-#             ei = self.link_sd_to_idx[e]
-#             print("e is %s and ei is %s "%(e,ei))
-        for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
-            for e in self.lp_links:
-                ei = self.link_sd_to_idx[e]
-                #print("for edge %s ei %s capacity is %s "%(e,ei,self.link_capacities[ei]))
-                #print("each_t_link_index ",each_t_link_index)
-                time_link_indx = each_t_link_index[(traffic_m_indx,ei)]
-#                 for pr in all_flows:
-#                     for path in each_flow_paths[pr]:
-#                         if e in each_path_edges[path]:
-#                             print("time %s time_link_indx %s edge %s,%s was in path %s for flow %s"%(traffic_m_indx,time_link_indx,e,ei,each_path_edges[path],pr))
-#                         else:
-#                             print("time %s time_link_indx %s edge %s,%s was not in path %s for flow %s"%(traffic_m_indx,time_link_indx,e,ei,each_path_edges[path],pr))
-#                         print("link load time link indx",link_load[time_link_indx])
-                #print("thsi is link_load ***** ",link_load)
-    
-                model += (link_load[time_link_indx] == lpSum([demands[traffic_m_indx][pr]*ratio[traffic_m_indx,pr, path]
-                    for pr in all_flows  for path in each_flow_paths[pr] if (e in each_path_edges[path])]), "link_load_constr%d_%d"%(traffic_m_indx,ei))
-
-                model += (link_load[time_link_indx] <= self.link_capacities[ei]*r, "congestion_ratio_constr%d"%ei)
-
-        model += r + OBJ_EPSILON*lpSum([link_load[t_e] for t_e in time_links_load_indexes])/T
-
-        model.solve(solver=GLPK(msg=False))
-        assert LpStatus[model.status] == 'Optimal'
-
-        obj_r = r.value()
-        optimal_robust_paths = []
-        each_flow_robust_paths_edges={}
-        robust_path_counter = 0
-        
-        optimal_robust_paths = []
-        for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
-            for pr,paths in each_flow_paths.items():
-                rate_sum = 0
-                flow =  self.pair_idx_to_sd[pr]
-                for path_id in paths:
-                    rate_sum+= ratio[traffic_m_indx,pr, path_id].value()
-                    if ratio[traffic_m_indx,pr, path_id].value()>0:
-                        this_path_edges = each_path_edges[path_id]
-                        #print("for time %s flow %s path %s edges are %s"%(traffic_m_indx,flow,path,this_path_edges))
-                        if path_id not in optimal_robust_paths:
-                            optimal_robust_paths.append(path_id)
-                        for edge in this_path_edges:
-                            try:
-                                if edge not in each_flow_robust_paths_edges[flow]:
-                                    each_flow_robust_paths_edges[flow].append(edge)
-                            except:
-                                try:
-                                    each_flow_robust_paths_edges[flow].append(edge)
-                                except:
-                                    each_flow_robust_paths_edges[flow]=[edge]
-                    
-                    
-                    
-                    
-#                 print("1: at time %s for flow %s the sum of rates of all paths is %s"%(traffic_m_indx,pr,rate_sum))     
-                          
-              
-        
-#         for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
-#             for pr in self.lp_pairs:
-#                 s, d = self.pair_idx_to_sd[pr]
-#                 flow = (s,d)
-#                 rate_sum  = 0
-#                 for path in each_flow_paths[pr]:
-#                     if each_path_variable[path].value()==1:
-#                         rate_sum = rate_sum+ratio[traffic_m_indx,pr, path].value() 
-#                         this_path_edges = each_path_edges[path]
-#                         #print("for time %s flow %s path %s edges are %s"%(traffic_m_indx,flow,path,this_path_edges))
-#                         if path not in optimal_robust_paths:
-#                             optimal_robust_paths.append(path)
-#                         for edge in this_path_edges:
-#                             try:
-#                                 if edge not in each_flow_robust_paths_edges[flow]:
-#                                     each_flow_robust_paths_edges[flow].append(edge)
-#                             except:
-#                                 try:
-#                                     each_flow_robust_paths_edges[flow].append(edge)
-#                                 except:
-#                                     each_flow_robust_paths_edges[flow]=[edge]
-#                 print("at time %s for flow %s the sum of rates of all paths is %s"%(traffic_m_indx,flow,rate_sum))
-                                  
-        import pdb
-        
-#         for pr,paths in each_flow_paths.items():
-#             flow = self.pair_idx_to_sd[pr]
-#             if flow not in each_flow_robust_paths_edges:
-#                 print("we do not have even one path for flow!!!! ",flow)
-        #print("selected path numbers ",len(optimal_robust_paths))
-        #for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
-            #print("time is ",traffic_m_indx)
-        #print(each_flow_robust_paths_edges)
-        #print(each_flow_robust_paths_edges[(0,1)])
-        #pdb.set_trace()
-        optimal_mlus,optimal_solutions = self.mlu_routing_selected_paths(tm_idx,look_ahead_window,
-                                                               each_flow_robust_paths_edges)
-        
-        
-        for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
-            solution = {}
-            for k in ratio:
-                
-                #print(ratio)
-                time_of_key  = k[0]
-                #print("This is traffic indx %s and k is %s and time of key is %s"%(traffic_m_indx,k,time_of_key))
-                if time_of_key==traffic_m_indx:
-                    solution[k] = ratio[k].value()
-            optimal_mlu, optimal_mlu_delay = self.eval_optimal_robust_paths_routing_mlu(traffic_m_indx, solution, each_flow_paths,each_path_edges,eval_delay=False)
-            #print("we got the mlu %s for time %s "%(optimal_mlu,traffic_m_indx))
-            tm_mlu_using_suggested_paths.append(optimal_mlu)
-            solutions.append(solution)
-            #pdb.set_trace()
-        #print("******* we got the solution ",drl_mlu)
-        #return obj_r, solution 
-        #print("here are the four mlu",tm_mlu_using_suggested_paths)
-        #print("mlu using robust paths without hashing %s and with rehashing %s"%
-#               (sum(optimal_mlus)/len(optimal_mlus),sum(tm_mlu_using_suggested_paths)/len(tm_mlu_using_suggested_paths)))
-#         return tm_mlu_using_suggested_paths,solutions
-        number_of_selected_paths = 0
-        for path in all_paths:
-            number_of_selected_paths+= each_path_variable[path].value()
-        optimal_robust_paths.sort()
-#         for path in optimal_robust_paths:
-#             print("for optimal we have %s their flag %s path %s "%(len(optimal_robust_paths),number_of_selected_paths,path))
-        #return optimal_mlus,optimal_solutions,tm_mlu_using_suggested_paths,solutions
-        return optimal_mlus,optimal_solutions,optimal_mlus,optimal_solutions
-        if sum(optimal_mlus)/len(optimal_mlus)<sum(tm_mlu_using_suggested_paths)/len(tm_mlu_using_suggested_paths):
-            return optimal_mlus,optimal_solutions
-        else:
-            return tm_mlu_using_suggested_paths,solutions
-        
-    def mlu_routing_selected_paths(self,tm_idx,look_ahead_window,each_flow_edges):
-        #print("we check mlu for tm_idx",tm_idx)
         tm_mlu_using_suggested_paths = []
         solutions = []
         #for k in each_flow_edges.keys():
             #print('flow is ',k)
         for i in range(self.num_pairs):
             s, d = self.pair_idx_to_sd[i]
-            print("these are the edges of flow %s %s "%((s,d),each_flow_edges[(s,d)]))
+            #print("these are the edges of flow %s %s "%((s,d),each_flow_edges[(s,d)]))
             #print('flow is ',s,d)
         #print('self.lp_pairs',self.lp_pairs)
         #print(each_flow_edges)
@@ -819,7 +490,336 @@ class Game(object):
         #return obj_r, solution 
         #print("here are the four mlu",tm_mlu_using_suggested_paths)
         return tm_mlu_using_suggested_paths,solutions
-    def eval_optimal_robust_paths_routing_mlu(self,tm_idx, solution,each_flow_paths,each_path_edges, eval_delay=False):
+    def optimal_solution_for_robust_paths(self,tm_idx,look_ahead_window):
+        #print("we check mlu for tm_idx",tm_idx)
+        T= 0
+        R=0
+        all_paths = []
+        for path in self.each_path_edges:
+            if path not in all_paths:
+                all_paths.append(path)
+        for flow in self.lp_pairs:
+            R+=1 
+        R = max(R,self.max_moves)
+        for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
+            T+=1
+        all_flows = []
+        new_each_flow_paths = {}
+        for pr in self.lp_pairs:
+            s, d = self.pair_idx_to_sd[pr]
+            for path in self.each_flow_paths[(s,d)]:
+                try:
+                    new_each_flow_paths[pr].append(path)
+                except:
+                    new_each_flow_paths[pr]=[path]
+            all_flows.append(pr)
+#         for flow,paths in new_each_flow_paths.items():
+#             print("flow %s paths %s"%(flow,paths))
+        each_flow_paths = {}
+        each_path_flow = {}
+        for f,paths in new_each_flow_paths.items():
+            each_flow_paths[f] = paths
+            for path in paths:
+                each_path_flow[path] = f
+        tm_mlu_using_suggested_paths = []
+        solutions = []
+
+        import pdb
+        #pdb.set_trace()
+        demands = {}
+        for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
+            tm = self.traffic_matrices[traffic_m_indx]
+            for i in range(self.num_pairs):
+                s, d = self.pair_idx_to_sd[i]
+                try:
+                    demands[traffic_m_indx][i] = tm[s][d]
+                except:
+                    demands[traffic_m_indx]={}
+                    demands[traffic_m_indx][i] = tm[s][d]
+                    
+                #demands[i] = 0
+                #print("demand from src %s to dst %s is %s"%(s,d,demands[i])) 
+        time_links_load_indexes = []
+        model = LpProblem(name="routing")
+    #         print('this %s is our self.pair_links' %(self.pair_links)) 
+        new_time_flow_paths_indexes = []
+        time_link_tracker_id = 0
+        each_t_link_index = {}
+        for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
+            #print("these are pair links",self.pair_links)
+            for link in self.links:
+                time_links_load_indexes.append(time_link_tracker_id)
+                #print("key is %s trafic_mx_id %s link %s"%((traffic_m_indx,link),traffic_m_indx,link))
+                each_t_link_index[(traffic_m_indx,link)] = time_link_tracker_id
+                time_link_tracker_id +=1
+            for pr,paths in each_flow_paths.items():
+                for path_id in paths:
+                    new_time_flow_paths_indexes.append((traffic_m_indx,pr,path_id))
+                #print("for time %s flow %s links are %s "%(traffic_m_indx,flow_links))
+        import pdb
+        
+        ratio = LpVariable.dicts(name="ratio", indexs=new_time_flow_paths_indexes, lowBound=0, upBound=1)
+        each_path_variable = LpVariable.dicts(name="pathflagh", indexs=self.each_path_edges.keys(),cat="Integer", lowBound=0, upBound=1)
+        #print(ratio)
+        
+        link_load = LpVariable.dicts(name="time_link_load", indexs=time_links_load_indexes)
+#         print("this %s is self.lp_links"%(self.lp_links))
+#         print("this %s is self.lp_nodes"%(self.lp_nodes))
+#         print("this %s is self.lp_pairs"%(self.lp_pairs))
+        import pdb
+        
+        r = LpVariable(name="congestion_ratio")
+#         for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
+#             for pr in all_flows:
+#                 for path in each_flow_paths[pr]:
+#                 #for edge in self.lp_links:
+# #                     if (edge[0],edge[1]) not in each_flow_edges[(s,d)]:
+#                     if  each_path_variable[path] ==0:
+#                         model +=(ratio[traffic_m_indx,pr, path] ==0.0)
+        for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
+            for pr in self.lp_pairs:
+                s, d = self.pair_idx_to_sd[pr]
+                flow = (s,d)
+    #            print("for pr %s we add"%(pr))
+                #s, d = self.pair_idx_to_sd[pr]
+                model += (lpSum([ratio[traffic_m_indx,pr, path] 
+                                 for path in each_flow_paths[pr]]) == 1 ,
+                          "flow_conservation_constr1_%d_%d"%(traffic_m_indx,pr))
+        #print("the value of R is %s"%(R))
+        model += (lpSum([each_path_variable[path] for path in all_paths]) == R,"all_paths")
+
+#         for pr in self.lp_pairs:
+#             for n in self.lp_nodes:
+#                 if n not in self.pair_idx_to_sd[pr]:
+#                     model += (lpSum([ratio[pr, e[0], e[1]] 
+#                     for e in self.lp_links if e[1] == n]) -
+#                     lpSum([ratio[pr, e[0], e[1]] for e in self.lp_links if e[0] == n]) == 0,
+#                     "flow_conservation_constr3_%d_%d"%(pr,n))
+
+#         for e in self.lp_links:
+#             ei = self.link_sd_to_idx[e]
+#             print("e is %s and ei is %s "%(e,ei))
+        for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
+            for e in self.lp_links:
+                ei = self.link_sd_to_idx[e]
+                #print("for edge %s ei %s capacity is %s "%(e,ei,self.link_capacities[ei]))
+                #print("each_t_link_index ",each_t_link_index)
+                time_link_indx = each_t_link_index[(traffic_m_indx,ei)]
+#                 for pr in all_flows:
+#                     for path in each_flow_paths[pr]:
+#                         if e in each_path_edges[path]:
+#                             print("time %s time_link_indx %s edge %s,%s was in path %s for flow %s"%(traffic_m_indx,time_link_indx,e,ei,each_path_edges[path],pr))
+#                         else:
+#                             print("time %s time_link_indx %s edge %s,%s was not in path %s for flow %s"%(traffic_m_indx,time_link_indx,e,ei,each_path_edges[path],pr))
+#                         print("link load time link indx",link_load[time_link_indx])
+                #print("thsi is link_load ***** ",link_load)
+    
+                model += (link_load[time_link_indx] == lpSum([demands[traffic_m_indx][pr]*ratio[traffic_m_indx,pr, path]
+                    for pr in all_flows  for path in each_flow_paths[pr] if (e in self.each_path_edges[path])]), "link_load_constr%d_%d"%(traffic_m_indx,ei))
+
+                model += (link_load[time_link_indx] <= self.link_capacities[ei]*r, "congestion_ratio_constr%d"%ei)
+
+        model += r + OBJ_EPSILON*lpSum([link_load[t_e] for t_e in time_links_load_indexes])/T
+
+        model.solve(solver=GLPK(msg=False))
+        assert LpStatus[model.status] == 'Optimal'
+
+        obj_r = r.value()
+        optimal_robust_paths = []
+        each_flow_robust_paths_edges={}
+        robust_path_counter = 0
+        
+        optimal_robust_paths = []
+        for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
+            for pr,paths in each_flow_paths.items():
+                rate_sum = 0
+                flow =  self.pair_idx_to_sd[pr]
+                for path_id in paths:
+                    rate_sum+= ratio[traffic_m_indx,pr, path_id].value()
+                    if ratio[traffic_m_indx,pr, path_id].value()>0:
+                        this_path_edges = self.each_path_edges[path_id]
+                        #print("for time %s flow %s path %s edges are %s"%(traffic_m_indx,flow,path,this_path_edges))
+                        if path_id not in optimal_robust_paths:
+                            optimal_robust_paths.append(path_id)
+                        for edge in this_path_edges:
+                            try:
+                                if edge not in each_flow_robust_paths_edges[flow]:
+                                    each_flow_robust_paths_edges[flow].append(edge)
+                            except:
+                                try:
+                                    each_flow_robust_paths_edges[flow].append(edge)
+                                except:
+                                    each_flow_robust_paths_edges[flow]=[edge]
+                    
+                    
+                    
+                    
+#                 print("1: at time %s for flow %s the sum of rates of all paths is %s"%(traffic_m_indx,pr,rate_sum))     
+                          
+              
+        
+#         for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
+#             for pr in self.lp_pairs:
+#                 s, d = self.pair_idx_to_sd[pr]
+#                 flow = (s,d)
+#                 rate_sum  = 0
+#                 for path in each_flow_paths[pr]:
+#                     if each_path_variable[path].value()==1:
+#                         rate_sum = rate_sum+ratio[traffic_m_indx,pr, path].value() 
+#                         this_path_edges = each_path_edges[path]
+#                         #print("for time %s flow %s path %s edges are %s"%(traffic_m_indx,flow,path,this_path_edges))
+#                         if path not in optimal_robust_paths:
+#                             optimal_robust_paths.append(path)
+#                         for edge in this_path_edges:
+#                             try:
+#                                 if edge not in each_flow_robust_paths_edges[flow]:
+#                                     each_flow_robust_paths_edges[flow].append(edge)
+#                             except:
+#                                 try:
+#                                     each_flow_robust_paths_edges[flow].append(edge)
+#                                 except:
+#                                     each_flow_robust_paths_edges[flow]=[edge]
+#                 print("at time %s for flow %s the sum of rates of all paths is %s"%(traffic_m_indx,flow,rate_sum))
+                                  
+        import pdb
+        
+#         for pr,paths in each_flow_paths.items():
+#             flow = self.pair_idx_to_sd[pr]
+#             if flow not in each_flow_robust_paths_edges:
+#                 print("we do not have even one path for flow!!!! ",flow)
+        #print("selected path numbers ",len(optimal_robust_paths))
+        #for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
+            #print("time is ",traffic_m_indx)
+        #print(each_flow_robust_paths_edges)
+        #print(each_flow_robust_paths_edges[(0,1)])
+        #pdb.set_trace()
+        optimal_mlus,optimal_solutions = self.mlu_routing_selected_paths(tm_idx,look_ahead_window,
+                                                               each_flow_robust_paths_edges)
+        
+        
+        for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
+            solution = {}
+            for k in ratio:
+                
+                #print(ratio)
+                time_of_key  = k[0]
+                #print("This is traffic indx %s and k is %s and time of key is %s"%(traffic_m_indx,k,time_of_key))
+                if time_of_key==traffic_m_indx:
+                    solution[k] = ratio[k].value()
+            optimal_mlu, optimal_mlu_delay = self.eval_optimal_robust_paths_routing_mlu(traffic_m_indx, solution, each_flow_paths,eval_delay=False)
+            #print("we got the mlu %s for time %s "%(optimal_mlu,traffic_m_indx))
+            tm_mlu_using_suggested_paths.append(optimal_mlu)
+            solutions.append(solution)
+            #pdb.set_trace()
+        #print("******* we got the solution ",drl_mlu)
+        #return obj_r, solution 
+        #print("here are the four mlu",tm_mlu_using_suggested_paths)
+        #print("mlu using robust paths without hashing %s and with rehashing %s"%
+#               (sum(optimal_mlus)/len(optimal_mlus),sum(tm_mlu_using_suggested_paths)/len(tm_mlu_using_suggested_paths)))
+#         return tm_mlu_using_suggested_paths,solutions
+        number_of_selected_paths = 0
+        for path in all_paths:
+            number_of_selected_paths+= each_path_variable[path].value()
+        optimal_robust_paths.sort()
+#         for path in optimal_robust_paths:
+#             print("for optimal we have %s their flag %s path %s "%(len(optimal_robust_paths),number_of_selected_paths,path))
+        #return optimal_mlus,optimal_solutions,tm_mlu_using_suggested_paths,solutions
+        return optimal_mlus,optimal_solutions,optimal_mlus,optimal_solutions
+        if sum(optimal_mlus)/len(optimal_mlus)<sum(tm_mlu_using_suggested_paths)/len(tm_mlu_using_suggested_paths):
+            return optimal_mlus,optimal_solutions
+        else:
+            return tm_mlu_using_suggested_paths,solutions
+        
+    def mlu_routing_selected_paths(self,tm_idx,look_ahead_window,each_flow_edges):
+        #print("we check mlu for tm_idx",tm_idx)
+        tm_mlu_using_suggested_paths = []
+        solutions = []
+        #for k in each_flow_edges.keys():
+            #print('flow is ',k)
+        for i in range(self.num_pairs):
+            s, d = self.pair_idx_to_sd[i]
+            #print("these are the edges of flow %s %s "%((s,d),each_flow_edges[(s,d)]))
+            #print('flow is ',s,d)
+        #print('self.lp_pairs',self.lp_pairs)
+        #print(each_flow_edges)
+        import pdb
+        #pdb.set_trace()
+        for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
+            tm = self.traffic_matrices[traffic_m_indx]
+
+            demands = {}
+            for i in range(self.num_pairs):
+                s, d = self.pair_idx_to_sd[i]
+                demands[i] = tm[s][d]
+                #demands[i] = 0
+                #print("demand from src %s to dst %s is %s"%(s,d,demands[i])) 
+
+            model = LpProblem(name="routing")
+    #         print('this %s is our self.pair_links' %(self.pair_links)) 
+            ratio = LpVariable.dicts(name="ratio", indexs=self.pair_links, lowBound=0, upBound=1)
+            #print(ratio)
+            link_load = LpVariable.dicts(name="link_load", indexs=self.links)
+    #         print("this %s is self.lp_links"%(self.lp_links))
+    #         print("this %s is self.lp_nodes"%(self.lp_nodes))
+    #         print("this %s is self.lp_pairs"%(self.lp_pairs))
+            import pdb
+            
+            r = LpVariable(name="congestion_ratio")
+            for pr in self.lp_pairs:
+                s, d = self.pair_idx_to_sd[pr]
+                for edge in self.lp_links:
+                    if (edge[0],edge[1]) not in each_flow_edges[(s,d)]:
+                        model +=(ratio[pr, edge[0], edge[1]] ==0.0)
+
+            for pr in self.lp_pairs:
+    #            print("for pr %s we add"%(pr))
+                #s, d = self.pair_idx_to_sd[pr]
+                model += (lpSum([ratio[pr, e[0], e[1]] 
+                                 for e in self.lp_links if e[1] == self.pair_idx_to_sd[pr][0]]) - 
+                          lpSum([ratio[pr, e[0], e[1]] 
+                            for e in self.lp_links if e[0] == self.pair_idx_to_sd[pr][0]]) == -1 ,
+                          "flow_conservation_constr1_%d"%pr)
+
+            for pr in self.lp_pairs:
+                model += (lpSum([ratio[pr, e[0], e[1]] 
+                        for e in self.lp_links if e[1] == self.pair_idx_to_sd[pr][1]]) -
+                        lpSum([ratio[pr, e[0], e[1]] 
+                        for e in self.lp_links if e[0] == self.pair_idx_to_sd[pr][1]]) == 1,
+                          "flow_conservation_constr2_%d"%pr)
+
+            for pr in self.lp_pairs:
+                for n in self.lp_nodes:
+                    if n not in self.pair_idx_to_sd[pr]:
+                        model += (lpSum([ratio[pr, e[0], e[1]] 
+                        for e in self.lp_links if e[1] == n]) -
+                        lpSum([ratio[pr, e[0], e[1]] for e in self.lp_links if e[0] == n]) == 0,
+                        "flow_conservation_constr3_%d_%d"%(pr,n))
+
+            for e in self.lp_links:
+                ei = self.link_sd_to_idx[e]
+                #print("for edge %s ei %s capacity is %s "%(e,ei,self.link_capacities[ei]))
+                model += (link_load[ei] == lpSum([demands[pr]*ratio[pr, e[0], e[1]] 
+                    for pr in self.lp_pairs]), "link_load_constr%d"%ei)
+
+                model += (link_load[ei] <= self.link_capacities[ei]*r, "congestion_ratio_constr%d"%ei)
+
+            model += r + OBJ_EPSILON*lpSum([link_load[e] for e in self.links])
+
+            model.solve(solver=GLPK(msg=False))
+            assert LpStatus[model.status] == 'Optimal'
+
+            obj_r = r.value()
+            solution = {}
+            for k in ratio:
+                solution[k] = ratio[k].value()
+            drl_mlu, optimal_mlu_delay = self.eval_optimal_routing_mlu(traffic_m_indx, solution, eval_delay=False)
+            tm_mlu_using_suggested_paths.append(drl_mlu)
+            solutions.append(solution)
+            #print("******* we got the solution ",drl_mlu)
+        #return obj_r, solution 
+        #print("here are the four mlu",tm_mlu_using_suggested_paths)
+        return tm_mlu_using_suggested_paths,solutions
+    def eval_optimal_robust_paths_routing_mlu(self,tm_idx, solution,each_flow_paths, eval_delay=False):
         optimal_link_loads = np.zeros((self.num_links))
         eval_tm = self.traffic_matrices[tm_idx]
         for i in range(self.num_pairs):
@@ -828,7 +828,7 @@ class Game(object):
             for e in self.lp_links:
                 link_idx = self.link_sd_to_idx[e]
                 for path in each_flow_paths[i]:
-                    if e in each_path_edges[path]:
+                    if e in self.each_path_edges[path]:
                         #print("for src %s dst %s  e %s we have demand %s and solution %s "%(s,d,e,demand,solution[i, e[0], e[1]]))
                         optimal_link_loads[link_idx] += demand*solution[tm_idx,i, path]
         
@@ -992,42 +992,43 @@ class Game(object):
         optimal_delay = sum(optimal_link_loads / (self.link_capacities - optimal_link_loads))
 
         return optimal_delay
-    def get_suggested_paths_by_rl(self,actions,each_flow_paths,each_path_id,each_id_path,each_flow_shortest_path):
+    def get_suggested_paths_by_rl(self,actions):
         
-        for flow,paths in each_flow_paths.items():
+        for flow,paths in self.each_flow_paths.items():
             covered_flow = False
-            for path in paths:
-                path_id = each_path_id[path]
+            for path_id in paths:
+                #path_id = self.each_path_id[path]
                 if not covered_flow:
                     if path_id in actions:
                         covered_flow =True 
             if not covered_flow:
                 #print("flow  did not have any candidate path in chosen paths",flow)
-                flow_shortest_path = each_flow_shortest_path[flow]
+                flow_shortest_path = self.each_flow_shortest_path[flow]
                 #print(flow_shortest_path)
                 #print(each_path_id)
-                path_id = each_path_id[tuple(flow_shortest_path)]
+                path_id = self.each_path_id[tuple(flow_shortest_path)]
 
                 actions = np.append(actions, path_id)
-        print("these are the paths of flow ",each_flow_paths[(0,4)])
-        for flow in each_flow_paths:
-            if flow not in each_flow_shortest_path:
-                print("the flow %s does not have a shortest path!!!!"%(flow))
+#         print("these are the paths of flow ",self.each_flow_paths[(0,4)])
+#         for flow in self.each_flow_paths:
+#             if flow not in self.each_flow_shortest_path:
+#                 print("the flow %s does not have a shortest path!!!!"%(flow))
         each_flow_edges = {}
-        for flow in each_flow_shortest_path:
-            print("for flow ",flow)
+        for flow in self.each_flow_shortest_path:
+            #print("for flow ",flow)
             for path in actions:
                 #path = each_id_path[path_id]
-                if path in each_flow_paths[flow]:
-                    print("we are going to add these edges ",path_id,path)
-                    for node_indx in range(len(path)-1):
+                if path in self.each_flow_paths[flow]:
+                    #print("we are going to add these edges ",path_id,path)
+                    path_edges = self.each_path_edges[path]
+                    for edge in path_edges:
                         try:
-                            if (path[node_indx],path[node_indx+1]) not in each_flow_edges[flow]:
-                                each_flow_edges[flow].append((path[node_indx],path[node_indx+1]))
-                                each_flow_edges[flow].append((path[node_indx+1],path[node_indx]))
+                            if edge not in each_flow_edges[flow]:
+                                each_flow_edges[flow].append(edge)
+                                each_flow_edges[flow].append((edge[1],edge[0]))
                         except:
-                            each_flow_edges[flow]=[(path[node_indx],path[node_indx+1])]
-                            each_flow_edges[flow].append((path[node_indx+1],path[node_indx]))
+                            each_flow_edges[flow]=[edge]
+                            each_flow_edges[flow].append((edge[1],edge[0]))
         return each_flow_edges
     
     def get_set_of_all_paths(self,tm_idx,look_ahead_window,each_flow_paths,each_path_id,each_id_path,each_flow_shortest_path,each_flow_oblivious_paths,topology_file,config):
@@ -1141,7 +1142,7 @@ class Game(object):
                 flow_shortest_path = each_flow_shortest_path[flow]
                 #print(flow_shortest_path)
                 #print(each_path_id)
-                path_id = each_path_id[tuple(flow_shortest_path)]
+                path_id = self.each_path_id[tuple(flow_shortest_path)]
                 
                 top_selected_path_ids.append(path_id)
                 #print("we added path id %s for safety"%(path_id))
@@ -1176,7 +1177,158 @@ class Game(object):
 #         print("and this is our max moves",self.max_moves)
         return each_flow_edges
 # In[ ]:
+    def set_paths_info(self,env,topology_name,each_topology_each_t_each_f_paths):
+    
+        self.each_path_edges = {}
+        self.each_flow_paths = {}
+        self.each_flow_shortest_path ={}
+        self.each_path_id={}
+        self.each_id_path={}
+        all_the_paths = set([])
+        each_t_paths = {}
+        #print('topology is ',topology_name)
+        with open(each_topology_each_t_each_f_paths) as file:
+            lines = file.readlines()
+            for line in lines:
+                if topology_name in line:#ATT_topology_file_modified:189:1->20: ['1', '13', '9', '4', '20'],['1', '9', '4', '20']
+                    time = line.split(":")[1]
+                    flow_str = line.split(":")[2]
+                    flow = flow_str.split("->")
+                    flow = (int(flow[0]),int(flow[1]))
+                    paths = line.split(flow_str+":")[1]
+                    paths = paths.strip()
+                    paths = "\""+str(paths)+"\""
+                    paths = ast.literal_eval(paths)
+                    #print('time %s flow %s paths %s'%(time,flow, paths))
+                    #print(type(paths),len(paths))
+                    if '],[' in paths:
+                        paths = ast.literal_eval(paths)
+                    else:
+                        paths = ast.literal_eval(paths)
+                        new_path = []
+                        for p in paths:
+                            new_path.append(p)
+                        paths = [new_path]
+                    #print('2time %s flow %s paths %s'%(time,flow, paths))
+                    #print(type(paths),len(paths))
+                    for p in paths:
+                        p = tuple(p)
+                        new_p= []
+                        for node in p:
+                            new_p.append(int(node))
+                        p = tuple(new_p)
 
+                        try:
+                            each_t_paths[time].add(p)
+                        except:
+                            each_t_paths[time] = set([p])
+                        all_the_paths.add(p)
+
+        
+        
+        
+        path_counter = 0
+        each_path_id = {}
+        set_of_times = set([])
+        each_flow_path_usage = {}
+        all_the_paths = set([])
+        each_t_paths = {}
+        each_flow_paths = {}
+        #print('topology is ',topology_name)
+        with open(each_topology_each_t_each_f_paths) as file:
+            lines = file.readlines()
+            for line in lines:
+                if topology_name in line:#ATT_topology_file_modified:189:1->20: ['1', '13', '9', '4', '20'],['1', '9', '4', '20']
+                    time = line.split(":")[1]
+                    flow_str = line.split(":")[2]
+                    flow = flow_str.split("->")
+                    flow = (int(flow[0]),int(flow[1]))
+                    set_of_times.add(time)
+                    paths = line.split(flow_str+":")[1]
+                    paths = paths.strip()
+                    paths = "\""+str(paths)+"\""
+                    paths = ast.literal_eval(paths)
+                    #print('time %s flow %s paths %s'%(time,flow, paths))
+                    #print(type(paths),len(paths))
+                    if '],[' in paths:
+                        paths = ast.literal_eval(paths)
+                    else:
+                        paths = ast.literal_eval(paths)
+                        new_path = []
+                        for p in paths:
+                            new_path.append(p)
+                        paths = [new_path]
+                    #print('2time %s flow %s paths %s'%(time,flow, paths))
+                    #print(type(paths),len(paths))
+                    for p in paths:
+                        p = tuple(p)
+                        new_p= []
+                        for node in p:
+                            new_p.append(int(node))
+                        p = tuple(new_p)
+                        try:
+                            each_t_paths[time].add(p)
+                        except:
+                            each_t_paths[time] = set([p])
+                            
+                        try:
+                            each_flow_paths[flow].add(p)
+                        except:
+                            each_flow_paths[flow] =set([p])
+                        try:
+                            each_t_paths[time].add(p)
+                        except:
+                            each_t_paths[time] = set([p])
+                        all_the_paths.add(p)
+                        #print('this is a path ',p)
+                        
+                        
+        paths_number = []
+        for time, paths in each_t_paths.items():
+            #print('for time %s we had %s paths'%(time,len(paths)))
+            paths_number.append(len(paths))
+        avg_paths_per_time = int((sum(paths_number)/len(paths_number)))
+        
+        each_path_id = {}
+        id_counter = 0
+        each_id_path = {}
+        covered_paths = []
+        for flow,paths in each_flow_paths.items():
+            for p in paths:
+                #print("theis was path ",p)
+                covered_paths.append(tuple(p))
+                self.each_path_id[tuple(p)] = id_counter
+                self.each_id_path[id_counter] = tuple(p)
+                id_counter+=1
+        self.each_flow_shortest_path = env.topology.get_each_flow_shortest_paths()
+        for flow,paths in self.each_flow_shortest_path.items():
+            
+            #print("this is the path ",tuple(paths))
+            if tuple(paths) not in covered_paths:
+                each_flow_paths[flow].add(tuple(paths))
+                covered_paths.append(tuple(paths))
+                self.each_path_id[tuple(paths)] = id_counter
+                self.each_id_path[id_counter] = tuple(paths)
+                id_counter+=1
+        
+        
+        for flow, paths in each_flow_paths.items():
+            for path in paths:
+                path_id = self.each_path_id[path]
+                try:
+                    self.each_flow_paths[flow].add(path_id)
+                except:
+                    self.each_flow_paths[flow]=set([path_id])
+                for node_indx in range(len(path)-1):
+                    try:
+                        if (path[node_indx],path[node_indx+1]) not in self.each_path_edges[path_id]:
+                            self.each_path_edges[path_id].append((path[node_indx],path[node_indx+1]))
+                            self.each_path_edges[path_id].append((path[node_indx+1],path[node_indx]))
+                    except:
+                        self.each_path_edges[path_id]=[(path[node_indx],path[node_indx+1])]
+                        self.each_path_edges[path_id].append((path[node_indx+1],path[node_indx]))
+                
+        
     def get_each_flow_paths_and_path_id(self,env,config,topology_name):
         """in this function, we get the B=4 most used paths by each flow
 
@@ -1295,7 +1447,7 @@ class CFRRL_Game(Game):
     def get_state(self, tm_idx):
         idx_offset = self.tm_history - 1
         return self.normalized_traffic_matrices[tm_idx-idx_offset]
-    def reward2(self, tm_idx,all_tms,look_ahead_window,each_flow_edges,each_flow_paths,each_path_id,each_id_path,each_flow_shortest_path,topology_file,printing_flag):
+    def reward2(self, tm_idx,all_tms,look_ahead_window,each_flow_edges,topology_file,printing_flag):
         
 #         _, solution = self.optimal_routing_mlu(tm_idx)
 #         optimal_mlu, optimal_mlu_delay = self.eval_optimal_routing_mlu(tm_idx, solution, eval_delay=False)
@@ -1447,8 +1599,8 @@ class CFRRL_Game(Game):
         #print("this is the scheme ",scheme)
         time_index = tm_idx
         
-        each_flow_shortest_path = env.topology.get_each_flow_shortest_paths()
-        each_flow_paths,each_path_id,each_id_path = self.get_each_flow_paths_and_path_id(env,config,topology_file)
+        #each_flow_shortest_path = env.topology.get_each_flow_shortest_paths()
+        #each_flow_paths,each_path_id,each_id_path = self.get_each_flow_paths_and_path_id(env,config,topology_file)
         each_flow_oblivious_paths = env.topology.get_each_flow_oblivious_paths(config.raeke_paths)
         if scheme =="ECMP":
             """for ECMP mlu"""
@@ -1459,18 +1611,23 @@ class CFRRL_Game(Game):
             """for Oblivious routing"""
             
             each_flow_oblivious_paths_edges = env.topology.get_oblivious_paths_each_flow_edges(config.raeke_paths,
-                                                                                          max_move,each_flow_shortest_path)
+                                                                                          max_move,self.each_flow_shortest_path)
             oblivious_mlus,oblivious_solutions = self.mlu_routing_selected_paths_oblivious(tm_idx,look_ahead_window,
                                                                              each_flow_oblivious_paths_edges)
+#             oblivious_mlus,oblivious_solutions  = self.mlu_routing_selected_paths(tm_idx,look_ahead_window,
+#                                                                    each_flow_oblivious_paths_edges)
             solution = {}
             return oblivious_mlus,oblivious_solutions,1,solution
         elif scheme =="Oblivious2":
             """for Oblivious routing"""
             
             each_flow_oblivious_paths_edges = env.topology.get_oblivious_paths_each_flow_edges(config.raeke_paths,
-                                                                                          max_move,each_flow_shortest_path)
+                                                                                          max_move,self.each_flow_shortest_path)
             oblivious_mlus,oblivious_solutions = self.mlu_routing_selected_paths_oblivious2(tm_idx,look_ahead_window,
                                                                              each_flow_oblivious_paths_edges)
+            
+#             oblivious_mlus,oblivious_solutions  = self.mlu_routing_selected_paths(tm_idx,look_ahead_window,
+#                                                                    each_flow_oblivious_paths_edges)
             solution = {}
             return oblivious_mlus,oblivious_solutions,1,solution
         elif scheme =="MLU-greedy":
@@ -1481,46 +1638,81 @@ class CFRRL_Game(Game):
             solution = {}
             return mlu_greedy_mlus,mlu_greedy_solutions,1,solution
         elif scheme=="Optimal":
-            each_flow_all_paths,each_path_edges = self.get_set_of_all_paths(tm_idx,
-                                                                                 look_ahead_window,each_flow_paths,
-                                                                                 each_path_id,each_id_path,
-                                                                                 each_flow_shortest_path,each_flow_oblivious_paths,
-                                                                                 topology_file,config)
+#             each_flow_all_paths,each_path_edges = self.get_set_of_all_paths(tm_idx,
+#                                                                                  look_ahead_window,each_flow_paths,
+#                                                                                  each_path_id,each_id_path,
+#                                                                                  each_flow_shortest_path,each_flow_oblivious_paths,
+#                                                                                  topology_file,config)
             
             
             
-            all_paths = []
-            set_all_paths = []
-            for flow,paths in each_flow_all_paths.items():
-                for path in paths:
-                    edges = each_path_edges[path]
-#                     edges.sort()
-                    if edges not in set_all_paths:
-                        set_all_paths.append(edges)
-                    all_paths.append(edges)
-                    #print("flow %s path %s edges %s "%(flow,path,edges))
-            #print("list of paths have %s set %s "%(len(all_paths),len(set_all_paths)))
+           
+ 
            
             import pdb
             #pdb.set_trace()
-            optimal1_mlus,optimal1_solutions,optimal2_mlus,optimal2_solutions = self.optimal_solution_for_robust_paths(tm_idx,look_ahead_window,
-                                                                             each_flow_all_paths,each_path_edges)
+            optimal1_mlus,optimal1_solutions,optimal2_mlus,optimal2_solutions = self.optimal_solution_for_robust_paths(
+                                                                            tm_idx,look_ahead_window)
         
             return optimal1_mlus,optimal1_solutions,optimal2_mlus,optimal2_solutions
         elif scheme =="DRL":
             """for RL approach"""
             time_index = tm_idx
             max_move = len(actions)
-            each_flow_edges_rl_approach = self.get_suggested_paths_by_rl(actions,each_flow_paths,
-                                                                         each_path_id,each_id_path,
-                                                                         each_flow_shortest_path)
+            each_flow_edges_rl_approach = self.get_suggested_paths_by_rl(actions)
+            
+#             each_flow_oblivious_paths_edges = env.topology.get_oblivious_paths_each_flow_edges(config.raeke_paths,
+#                                                                                           max_move,self.each_flow_shortest_path)
+            
+#             oblivious_max_node_number = []
+#             rl_max_node_number = []
+#             for flow,edges in each_flow_edges_rl_approach.items():
+#                 for edge in edges:
+#                     rl_max_node_number.append(edge[0])
+#                     rl_max_node_number.append(edge[1])
+#                 print("for flow %s we have edges in RL        %s "%(flow,edges))
+#                 print("for flow %s we have edges in oblivious %s"%(flow,each_flow_oblivious_paths_edges[flow]))
+#                 for edge in each_flow_oblivious_paths_edges[flow]:
+#                     oblivious_max_node_number.append(edge[0])
+#                     oblivious_max_node_number.append(edge[1])
+#                 if (len(each_flow_oblivious_paths_edges[flow])%2!=0):
+#                     print("error")
+#             print("max rl %s max  oblivios %s"%(max(rl_max_node_number),max(oblivious_max_node_number)))
+#             print("min rl %s min  oblivios %s"%(min(rl_max_node_number),min(oblivious_max_node_number)))
+            print("unique rl %s unique  oblivios %s"%(len(list(set(rl_max_node_number))),len(list(set(oblivious_max_node_number)))))
             actions.sort()
 #             for path in actions:
 #                 print("for DRL sceme we have %s path %s"%(len(actions),path))
             solution = {}
             rl_mlus,rl_solutions = self.mlu_routing_selected_paths(tm_idx,look_ahead_window,
                                                                    each_flow_edges_rl_approach)
+#             print("MLU using rl is ",sum(rl_mlus)/len(rl_mlus))
+#             for limit in [1,2,3,4,5,6,7,8,9,10,20,40,80,120,200,300,400,1000]:
+#                 backup_each_flow_edges_rl_approach = {}
+#                 for flow ,edges in each_flow_edges_rl_approach.items():
+#                     backup_each_flow_edges_rl_approach[flow] = edges
+#                 counter = 0
+#                 for edge in self.lp_links:
+#                     print("this is an edge ",edge)
+#                 for flow ,edges in each_flow_oblivious_paths_edges.items():
+#                     if flow != (0,3):
+#                         if counter <limit:
+#                             print("for flow ",flow)
+#                             #for edge in edges:
+#                             #    if edge not in each_flow_edges_rl_approach[flow]:
+#                             print("we replace this edges ",backup_each_flow_edges_rl_approach[flow])
+#                             print("with these ",edges)
+#                             backup_each_flow_edges_rl_approach[flow] = edges
+#                             for edge in edges:
+#                                 if edge not in self.lp_links:
+#                                     print("this is an ERROR!! link  does not exist in lp_links",edge)
+#                             counter+=1
+#                 print("done adding edge to the default rl edges",limit)
+#                 oblivious_mlus,oblivious_solutions  = self.mlu_routing_selected_paths(tm_idx,look_ahead_window,
+#                                                                        backup_each_flow_edges_rl_approach)
 
+#                 print("the mlu using oblivious is ",len(oblivious_mlus)/len(oblivious_mlus))
+#                 time.sleep(5)
             return rl_mlus,rl_solutions,1,solution
     
         
