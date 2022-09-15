@@ -468,9 +468,9 @@ def main(_):
 #                     each_path_edges[id_counter].append((path[node_indx+1],path[node_indx]))
 #             id_counter+=1
             
-    for commitment_window in [10]:
+    for commitment_window in [10,12]:
         #for look_ahead_window in range(4,int(config.look_ahead_window_range)):
-        for look_ahead_window in [4]:
+        for look_ahead_window in [8]:
             """we first find the candidate paths and use it for action dimention"""
             
             

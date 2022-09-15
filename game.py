@@ -251,6 +251,63 @@ class Game(object):
             solution[k] = ratio[k].value()
 
         return obj_r, solution
+    
+    def current_mlu_optimal_routing_mlu(self, tm_idx):
+        
+        
+        tm = self.traffic_matrices[tm_idx]
+
+        demands = {}
+        for i in range(self.num_pairs):
+            s, d = self.pair_idx_to_sd[i]
+            demands[i] = tm[s][d]
+            #print("demand from src %s to dst %s is %s"%(s,d,demands[i])) 
+
+        model = LpProblem(name="routing")
+        #print('this %s is our self.pair_links' %(self.pair_links)) 
+        ratio = LpVariable.dicts(name="ratio", indexs=self.pair_links, lowBound=0, upBound=1)
+        #print(ratio)
+        link_load = LpVariable.dicts(name="link_load", indexs=self.links)
+        #print("this %s is self.lp_links"%(self.lp_links))
+        #print("this %s is self.lp_nodes"%(self.lp_nodes))
+        #print("this %s is self.lp_pairs"%(self.lp_pairs))
+        r = LpVariable(name="congestion_ratio")
+#         for pr in self.lp_pairs:
+#             for edge in self.lp_links:
+#                 if (edge[0],edge[1]) not in each_flow_edges[pr]:
+#                     model +=(ratio[pr, edge[0], edge[1]] <=0.0)
+
+        for pr in self.lp_pairs:
+#            print("for pr %s we add"%(pr))
+            model += (lpSum([ratio[pr, e[0], e[1]] for e in self.lp_links if e[1] == self.pair_idx_to_sd[pr][0]]) - lpSum([ratio[pr, e[0], e[1]] for e in self.lp_links if e[0] == self.pair_idx_to_sd[pr][0]]) == -1 , "flow_conservation_constr1_%d"%pr)
+
+        for pr in self.lp_pairs:
+            model += (lpSum([ratio[pr, e[0], e[1]] for e in self.lp_links if e[1] == self.pair_idx_to_sd[pr][1]]) - lpSum([ratio[pr, e[0], e[1]] for e in self.lp_links if e[0] == self.pair_idx_to_sd[pr][1]]) == 1, "flow_conservation_constr2_%d"%pr)
+
+        for pr in self.lp_pairs:
+            for n in self.lp_nodes:
+                if n not in self.pair_idx_to_sd[pr]:
+                    model += (lpSum([ratio[pr, e[0], e[1]] for e in self.lp_links if e[1] == n]) - lpSum([ratio[pr, e[0], e[1]] for e in self.lp_links if e[0] == n]) == 0, "flow_conservation_constr3_%d_%d"%(pr,n))
+
+        for e in self.lp_links:
+            ei = self.link_sd_to_idx[e]
+            #print("for edge %s ei %s capacity is %s "%(e,ei,self.link_capacities[ei]))
+            model += (link_load[ei] == lpSum([demands[pr]*ratio[pr, e[0], e[1]] for pr in self.lp_pairs]), "link_load_constr%d"%ei)
+            model += (link_load[ei] <= self.link_capacities[ei]*r, "congestion_ratio_constr%d"%ei)
+
+        model += r + OBJ_EPSILON*lpSum([link_load[e] for e in self.links])
+
+        model.solve(solver=GLPK(msg=False))
+        assert LpStatus[model.status] == 'Optimal'
+
+        obj_r = r.value()
+        solution = {}
+        for k in ratio:
+            solution[k] = ratio[k].value()
+        mlu, optimal_mlu_delay = self.eval_optimal_routing_mlu(tm_idx, solution, eval_delay=False)
+           
+            
+        return mlu,solution
     def mlu_optimal_routing_mlu(self, tm_idx,look_ahead_window):
         mlus= []
         solutions = []
@@ -1567,22 +1624,11 @@ class CFRRL_Game(Game):
         
         
         
-    def evaluate3(self, env,config,tm_idx,all_tms,training_epoch,commitment_window, look_ahead_window,topology_file,actions=None, ecmp=True, eval_delay=False):
-        toplogy_t_solution_mlu_result = config.testing_results
-        time_index = tm_idx
-        each_flow_oblivious_paths = env.topology.get_each_flow_oblivious_paths(config.raeke_paths)
-        each_flow_shortest_path = env.topology.get_each_flow_shortest_paths()
-        each_flow_paths,each_path_id,each_id_path = self.get_each_flow_paths_and_path_id(env,config,topology_file)
-        each_flow_all_paths,each_path_edges = self.get_set_of_all_paths(tm_idx,
-                                                                             look_ahead_window,each_flow_paths,
-                                                                             each_path_id,each_id_path,
-                                                                             each_flow_shortest_path,each_flow_oblivious_paths,
-                                                                             topology_file,config)
-        
-        hindsight_mlus,hindsight_solutions = self.optimal_solution_for_robust_paths(tm_idx,look_ahead_window,
-                                                                             each_flow_all_paths,each_path_edges)
-        
-        
+    def evaluate3(self,tm_idx):
+        mlu_current,current_solutions = self.current_mlu_optimal_routing_mlu(tm_idx)
+        mlu_next,next_solutions = self.current_mlu_optimal_routing_mlu(tm_idx+1)
+        mlu_next_using_current,_  = self.eval_optimal_routing_mlu(tm_idx+1, current_solutions, eval_delay=False)
+        return mlu_current,mlu_next,mlu_next_using_current,current_solutions,next_solutions
     def evaluate2(self, env,config,tm_idx,all_tms,commitment_window, look_ahead_window,topology_file,scheme,max_move,actions=None, ecmp=True, eval_delay=False):
         
 #         toplogy_t_solution_mlu_result = config.testing_results
