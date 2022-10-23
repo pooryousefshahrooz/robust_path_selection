@@ -1,5 +1,5 @@
 class NetworkConfig(object):
-  scale = 2
+  scale = 1
 
   max_step = 1000 * scale
   
@@ -36,9 +36,9 @@ class Config(NetworkConfig):
   test_traffic_file = 'TM2'
   traffic_file = 'TM3'
   test_traffic_file = 'TM4'
-#   topology_file = 'ATT_topology_file_modified'
-#   traffic_file = 'TM3'
-#   test_traffic_file = 'TM4'
+  topology_file = 'ATT_topology_file_modified'
+  traffic_file = 'TM3'
+  test_traffic_file = 'TM4'
 #   topology_file = 'test_topology'
 #   traffic_file = 'TM'
 #   test_traffic_file = 'TM2'
@@ -58,8 +58,8 @@ class Config(NetworkConfig):
   over_utilization_results_file = "over_utilization_results_file.csv"
   raeke_paths = "raeke_abilene.txt"
   raeke_paths = "raeke_att_new"
-  capacity_division = 1# 8 for att and 1 for abilene
-  demand_scale = 4# 60 for att and 4 for abilene
+  capacity_division = 8# 8 for att and 1 for abilene
+  demand_scale = 60# 60 for att and 4 for abilene
 def get_config(FLAGS):
   config = Config
 

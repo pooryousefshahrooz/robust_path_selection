@@ -674,7 +674,7 @@ class Game(object):
                 model += (link_load[time_link_indx] == lpSum([demands[traffic_m_indx][pr]*ratio[traffic_m_indx,pr, path]
                     for pr in all_flows  for path in each_flow_paths[pr] if (e in self.each_path_edges[path])]), "link_load_constr%d_%d"%(traffic_m_indx,ei))
 
-                model += (link_load[time_link_indx] <= self.link_capacities[ei]*r, "congestion_ratio_constr%d"%ei)
+                model += (link_load[time_link_indx] <= self.link_capacities[ei]*r, "congestion_ratio_constr%d%d"%(traffic_m_indx,ei))
 
         model += r + OBJ_EPSILON*lpSum([link_load[t_e] for t_e in time_links_load_indexes])/T
 
@@ -869,6 +869,96 @@ class Game(object):
             solution = {}
             for k in ratio:
                 solution[k] = ratio[k].value()
+            drl_mlu, optimal_mlu_delay = self.eval_optimal_routing_mlu(traffic_m_indx, solution, eval_delay=False)
+            tm_mlu_using_suggested_paths.append(drl_mlu)
+            solutions.append(solution)
+            #print("******* we got the solution ",drl_mlu)
+        #return obj_r, solution 
+        #print("here are the four mlu",tm_mlu_using_suggested_paths)
+        return tm_mlu_using_suggested_paths,solutions
+    def mlu_routing_selected_paths_fixed_rates(self,tm_idx,look_ahead_window,each_flow_edges):
+        #print("we check mlu for tm_idx",tm_idx)
+        tm_mlu_using_suggested_paths = []
+        solutions = []
+        #for k in each_flow_edges.keys():
+            #print('flow is ',k)
+        for i in range(self.num_pairs):
+            s, d = self.pair_idx_to_sd[i]
+            #print("these are the edges of flow %s %s "%((s,d),each_flow_edges[(s,d)]))
+            #print('flow is ',s,d)
+        #print('self.lp_pairs',self.lp_pairs)
+        #print(each_flow_edges)
+        import pdb
+        #pdb.set_trace()
+
+        tm = self.traffic_matrices[tm_idx]
+
+        demands = {}
+        for i in range(self.num_pairs):
+            s, d = self.pair_idx_to_sd[i]
+            demands[i] = tm[s][d]
+            #demands[i] = 0
+            #print("demand from src %s to dst %s is %s"%(s,d,demands[i])) 
+
+        model = LpProblem(name="routing")
+#         print('this %s is our self.pair_links' %(self.pair_links)) 
+        ratio = LpVariable.dicts(name="ratio", indexs=self.pair_links, lowBound=0, upBound=1)
+        #print(ratio)
+        link_load = LpVariable.dicts(name="link_load", indexs=self.links)
+#         print("this %s is self.lp_links"%(self.lp_links))
+#         print("this %s is self.lp_nodes"%(self.lp_nodes))
+#         print("this %s is self.lp_pairs"%(self.lp_pairs))
+        import pdb
+
+        r = LpVariable(name="congestion_ratio")
+        for pr in self.lp_pairs:
+            s, d = self.pair_idx_to_sd[pr]
+            for edge in self.lp_links:
+                if (edge[0],edge[1]) not in each_flow_edges[(s,d)]:
+                    model +=(ratio[pr, edge[0], edge[1]] ==0.0)
+
+        for pr in self.lp_pairs:
+#            print("for pr %s we add"%(pr))
+            #s, d = self.pair_idx_to_sd[pr]
+            model += (lpSum([ratio[pr, e[0], e[1]] 
+                             for e in self.lp_links if e[1] == self.pair_idx_to_sd[pr][0]]) - 
+                      lpSum([ratio[pr, e[0], e[1]] 
+                        for e in self.lp_links if e[0] == self.pair_idx_to_sd[pr][0]]) == -1 ,
+                      "flow_conservation_constr1_%d"%pr)
+
+        for pr in self.lp_pairs:
+            model += (lpSum([ratio[pr, e[0], e[1]] 
+                    for e in self.lp_links if e[1] == self.pair_idx_to_sd[pr][1]]) -
+                    lpSum([ratio[pr, e[0], e[1]] 
+                    for e in self.lp_links if e[0] == self.pair_idx_to_sd[pr][1]]) == 1,
+                      "flow_conservation_constr2_%d"%pr)
+
+        for pr in self.lp_pairs:
+            for n in self.lp_nodes:
+                if n not in self.pair_idx_to_sd[pr]:
+                    model += (lpSum([ratio[pr, e[0], e[1]] 
+                    for e in self.lp_links if e[1] == n]) -
+                    lpSum([ratio[pr, e[0], e[1]] for e in self.lp_links if e[0] == n]) == 0,
+                    "flow_conservation_constr3_%d_%d"%(pr,n))
+
+        for e in self.lp_links:
+            ei = self.link_sd_to_idx[e]
+            #print("for edge %s ei %s capacity is %s "%(e,ei,self.link_capacities[ei]))
+            model += (link_load[ei] == lpSum([demands[pr]*ratio[pr, e[0], e[1]] 
+                for pr in self.lp_pairs]), "link_load_constr%d"%ei)
+
+            model += (link_load[ei] <= self.link_capacities[ei]*r, "congestion_ratio_constr%d"%ei)
+
+        model += r + OBJ_EPSILON*lpSum([link_load[e] for e in self.links])
+
+        model.solve(solver=GLPK(msg=False))
+        assert LpStatus[model.status] == 'Optimal'
+
+        obj_r = r.value()
+        solution = {}
+        for k in ratio:
+            solution[k] = ratio[k].value()
+        for traffic_m_indx in range(tm_idx,tm_idx+look_ahead_window-1):
             drl_mlu, optimal_mlu_delay = self.eval_optimal_routing_mlu(traffic_m_indx, solution, eval_delay=False)
             tm_mlu_using_suggested_paths.append(drl_mlu)
             solutions.append(solution)
@@ -1543,10 +1633,10 @@ class CFRRL_Game(Game):
         epochs = []
         epochs.append(1)
         epochs.append(9)
-        while(max(epochs)<509):
-            epochs.append(max(epochs)+50)
-        while(max(epochs)<2999):
-            epochs.append(max(epochs)+400)
+        while(max(epochs)<709):
+            epochs.append(max(epochs)+30)
+        while(max(epochs)<1999):
+            epochs.append(max(epochs)+300)
         
         
         return list(epochs)
@@ -1652,7 +1742,30 @@ class CFRRL_Game(Game):
             """for ECMP mlu"""
             solutions = {}
             ecmp_mlus = self.eval_ecmp_traffic_distribution2(tm_idx,look_ahead_window, eval_delay=eval_delay)
+
+            
             return ecmp_mlus,solutions,1,solutions
+        elif scheme =="Shortest":
+            
+            each_flow_shortest_path_edges = {}
+            for flow,path in self.each_flow_shortest_path.items():
+                #print("this is the path for shortest path ")
+                #print(path)
+                #import pdb
+                for node_indx in range(len(path)-1):
+                    try:
+                        if (path[node_indx],path[node_indx+1]) not in each_flow_shortest_path_edges[flow]:
+                            each_flow_shortest_path_edges[flow].append((path[node_indx],path[node_indx+1]))
+                            each_flow_shortest_path_edges[flow].append((path[node_indx+1],path[node_indx]))
+                    except:
+                        each_flow_shortest_path_edges[flow]=[(path[node_indx],path[node_indx+1])]
+                        each_flow_shortest_path_edges[flow].append((path[node_indx+1],path[node_indx]))
+            shortest_path_mlus,shortest_path_solutions  = self.mlu_routing_selected_paths(tm_idx,look_ahead_window,
+                                                                   each_flow_shortest_path_edges)
+            shortest_path_mlus2,shortest_path_solutions2  = self.mlu_routing_selected_paths_fixed_rates(tm_idx,look_ahead_window,
+                                                                   each_flow_shortest_path_edges)
+            solution ={}
+            return shortest_path_mlus,shortest_path_solutions,shortest_path_mlus2,shortest_path_solutions2
         elif scheme =="Oblivious":
             """for Oblivious routing"""
             
